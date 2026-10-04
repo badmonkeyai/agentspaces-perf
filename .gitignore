@@ -1,0 +1,45 @@
+# AgentSpaces Perf: a standalone Maven project on the published AgentSpaces libraries.
+# Maven build output (every module)
+target/
+dependency-reduced-pom.xml
+pom.xml.versionsBackup
+.flattened-pom.xml
+.mvn/wrapper/maven-wrapper.jar
+
+# Compiled classes outside target, JVM crash logs
+*.class
+hs_err_pid*
+replay_pid*
+
+# IDEs and editors
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+.factorypath
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs, scratch, local environment
+*.log
+.env
+.env.local
+
+# Peer key material a running node persists; never commit a private key
+peer.key
+peer.keys/
+*.pem
+*.p12
+*.jks
+
+# JMH results written next to the benchmarks
+jmh-result.*
+*.jfr
