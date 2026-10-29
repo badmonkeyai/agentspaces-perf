@@ -88,7 +88,39 @@ mvn exec:java \
 mvn exec:java \
   -Dexec.mainClass=ai.badmonkey.agentspaces.perf.stress.ChurnRecoveryStress \
   -Dpeers=3 -Dentries=100
+
+# The content swarm: one seeder, every other peer fetching at once over TCP;
+# aggregate MiB/s and the share of bytes the seeder served against the swarm
+mvn exec:java \
+  -Dexec.mainClass=ai.badmonkey.agentspaces.perf.stress.ContentSwarmStress \
+  -Dpeers=8 -Dmebibytes=1024 -DpieceKiB=1024 -Dbinding=tcp -DdeadlineSeconds=1800
 ```
+
+`ContentSwarmStress` (srad/large-networks-bulk-data.md LB-O-08) writes the
+artifact to a temporary file, publishes it from peer 0 with a file-backed
+piece store on every peer, and reports per fetcher how many bytes came from
+the seeder and how many from the other fetchers; with one holder the seeder
+share is 100%, and it falls as the fleet grows. `-Dbinding=tcp` (the default)
+or `tls` (the TLS binding with per-peer channel certificates) picks what every
+peer listens on; `dtls` and `quic` live in their own modules and are not wired
+into `MiniFleet`. Every ten seconds the run prints each fetcher's verified pieces, and a fetcher
+that makes no progress for thirty seconds prints the tail of its trace.
+
+Recorded on 2026-10-27 on one macOS laptop, 1 GiB in 1 MiB pieces, every peer in one JVM:
+
+| Peers | Binding | Wall time | Aggregate | Seeder share |
+|---|---|---|---|---|
+| 2 | tcp | 2.3 s | 444 MiB/s | 100% |
+| 8 | tcp | 17.1 s | 411 MiB/s | 26% |
+| 2 | tls | 2.5 s | 418 MiB/s | 100% |
+| 8 | tls | 18.4 s | 390 MiB/s | 27% |
+
+Every fetcher served the others, and the seeder's share fell to about a quarter. LB-Q-PRF-01 asks
+eight peers on one host to finish within 2.5 times the single-stream copy; the swarm took 7.4
+times, so the row fails as written. Seven fetchers receive seven times the bytes of one, and the
+eight-peer aggregate rate stays near the single stream's, so on one host the swarm's time grows
+with the fetcher count. The first eight-peer run found a deadlock in the TCP and TLS readers, fixed
+the same day (srad/large-networks-bulk-data.md 10.4).
 
 The same harnesses run from the jar, with the properties before `-cp`:
 

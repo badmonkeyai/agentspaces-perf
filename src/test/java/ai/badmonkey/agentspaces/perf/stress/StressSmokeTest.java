@@ -59,4 +59,26 @@ class StressSmokeTest {
         assertThat(report.caughtUp()).isTrue();
         assertThat(report.catchUp()).isLessThan(Duration.ofSeconds(120));
     }
+
+    @Test
+    @Timeout(180)
+    void contentSwarmStressMovesTheArtifactToEveryFetcher() throws Exception {
+        ContentSwarmStress.Report report = ContentSwarmStress.run(3, 6L * 1024 * 1024 + 321, 256 * 1024,
+                Duration.ofSeconds(120));
+
+        assertThat(report.fetchers()).hasSize(2).allMatch(ContentSwarmStress.FetcherReport::complete);
+        assertThat(report.fetchers()).allMatch(f -> f.bytesFromSeeder() + f.bytesFromPeers() == report.bytes());
+        assertThat(report.mebibytesPerSec()).isGreaterThan(0.0);
+        assertThat(report.seederShare()).isBetween(0.0, 1.0);
+    }
+
+    @Test
+    @Timeout(180)
+    void contentSwarmStressRunsOnTheTlsBinding() throws Exception {
+        ContentSwarmStress.Report report = ContentSwarmStress.run(2, 2L * 1024 * 1024 + 7, 256 * 1024, "tls",
+                Duration.ofSeconds(120));
+
+        assertThat(report.binding()).isEqualTo("tls");
+        assertThat(report.fetchers()).singleElement().matches(ContentSwarmStress.FetcherReport::complete);
+    }
 }
