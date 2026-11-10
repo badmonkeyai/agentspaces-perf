@@ -29,6 +29,7 @@ import ai.badmonkey.agentspaces.api.spi.Transport;
 import ai.badmonkey.agentspaces.space.replicated.ReplicatedSpace;
 
 import java.io.IOException;
+import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -76,7 +77,7 @@ public final class MiniFleet implements AutoCloseable {
         this.binding = binding;
     }
 
-    /** The binding every peer listens on: {@code tcp} or {@code tls} (the TLS binding with per-peer channel certificates). */
+    /** The binding every peer listens on: {@code tcp}, {@code tls} (per-peer channel certificates), or {@code dtls} (UDP). */
     public String binding() {
         return binding;
     }
@@ -101,14 +102,14 @@ public final class MiniFleet implements AutoCloseable {
      * @param groupName    the group's founding name
      * @param peerCount    how many peers to start
      * @param settleWindow the take settle window for every replica
-     * @param binding      {@code tcp} or {@code tls}
+     * @param binding      {@code tcp}, {@code tls}, or {@code dtls}
      * @return the running fleet
      * @throws Exception when a peer fails to start
      */
     public static MiniFleet start(String groupName, int peerCount, Duration settleWindow, String binding)
             throws Exception {
-        if (!binding.equals("tcp") && !binding.equals("tls")) {
-            throw new IllegalArgumentException("binding must be tcp or tls, not " + binding);
+        if (!binding.equals("tcp") && !binding.equals("tls") && !binding.equals("dtls")) {
+            throw new IllegalArgumentException("binding must be tcp, tls, or dtls, not " + binding);
         }
         GroupId groupId = GroupId.fromFounding(groupName.getBytes(StandardCharsets.UTF_8));
         GroupAdvertisement group = new GroupAdvertisement(
@@ -130,10 +131,14 @@ public final class MiniFleet implements AutoCloseable {
      * @throws Exception when the peer fails to start
      */
     public synchronized Peer addPeer() throws Exception {
-        int port = freePort();
+        int port = binding.equals("dtls") ? freeUdpPort() : freePort();
         PeerIdentity identity = PeerIdentity.generate();
         PeerNode node = PeerNode.builder(identity).build();
-        Transport transport = binding.equals("tls") ? new TlsTcpTransport(identity) : new TcpTransport();
+        Transport transport = switch (binding) {
+            case "tls" -> new TlsTcpTransport(identity);
+            case "dtls" -> new ai.badmonkey.agentspaces.transport.dtls.DtlsTransport(identity);
+            default -> new TcpTransport();
+        };
         node.listen(transport, "127.0.0.1:" + port);
         List<PeerAdvertisement.Endpoint> seeds = seedPort == 0 ? List.of()
                 : List.of(new PeerAdvertisement.Endpoint(binding, "127.0.0.1:" + seedPort, 0));
@@ -191,6 +196,12 @@ public final class MiniFleet implements AutoCloseable {
 
     private static int freePort() throws IOException {
         try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
+    }
+
+    private static int freeUdpPort() throws IOException {
+        try (DatagramSocket socket = new DatagramSocket(0)) {
             return socket.getLocalPort();
         }
     }

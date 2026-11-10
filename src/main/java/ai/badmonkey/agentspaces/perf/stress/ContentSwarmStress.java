@@ -110,7 +110,7 @@ public final class ContentSwarmStress {
      * @param peerCount peers, the seeder included (at least 2)
      * @param bytes     the artifact size
      * @param pieceSize the piece size, a power of two in [64 KiB, 4 MiB]
-     * @param binding   {@code tcp} or {@code tls}
+     * @param binding   {@code tcp}, {@code tls}, or {@code dtls}
      * @param deadline  the hard stop
      * @return the report
      * @throws Exception when the fleet fails to start
@@ -250,7 +250,7 @@ public final class ContentSwarmStress {
 
     public static void main(String[] args) throws Exception {
         int peers = Integer.getInteger("peers", 8);
-        long mebibytes = Long.getLong("mebibytes", 256L);
+        long mebibytes = Long.getLong("mebibytes", 64L);
         int pieceKiB = Integer.getInteger("pieceKiB", 1024);
         int deadlineSeconds = Integer.getInteger("deadlineSeconds", 1800);
         String binding = System.getProperty("binding", "tcp");
