@@ -54,11 +54,12 @@ import java.util.function.Supplier;
  * writes small heads of its own first, so the Plumtree settles as under a fleet's own traffic; then member 0 writes a
  * delta of {@link #PUSH_DELTA_BYTES} and every follower must hold the root without a fetch. P2-Q-PRF-04 is the
  * owner's two checks of 2026-11-09 (srad/agentspaces-pdt2.md §10.16): (a) the writer answers no {@code GRAFT} for a
- * bundle another member has announced, which the run reads as the bundle copies the writer sent beyond its eager
- * pushes, its {@code RUMOR} bytes during the push in whole bundles less the eager copies, a bound that also counts an
- * answer to a member that heard the writer alone; and (b) the writer pushes one copy of each bundle per eager edge it
- * holds at the write, the edge count reported. The {@code GRAFT} frames that reached the writer, and the writer's
- * bytes over the delta's, stay in the report as figures.</li>
+ * bundle from an asker that had heard another member announce it, which an {@link AskerWitness} on every member's
+ * wire counts (ROBUSTNESS.md §10.11, "What stays open", item 2), while an answer to an asker that had heard the
+ * writer alone is allowed; and (b) the writer pushes one copy of each bundle per eager edge it holds at the write,
+ * the edge count reported. Every answer, the bundle copies the writer sent beyond its eager pushes (its {@code RUMOR}
+ * bytes during the push in whole bundles less the eager copies), the {@code GRAFT} frames that reached the writer,
+ * and the writer's bytes over the delta's stay in the report as figures.</li>
  * <li>{@code reconcile} (P2-K-02, P2-K-05, P2-Q-PRF-06): members 0 and 1 reconcile two sets of
  * {@link #RECONCILE_SET} roots that differ by {@link #RECONCILE_DIFFERENCE} at random places, once by negentropy and
  * once by RIBLT, through {@code Content.reconcileHeld}.</li>
@@ -96,12 +97,24 @@ public final class PushReconcileStress {
      * @param eagerEdgesAfter the same just after the write, which published the bundles; a PRUNE that lands between the
      *                        two moves the count, so the copies of a bundle lie between them
      * @param graftsAtWriter the GRAFT frames that reached the writer during the push, for any item
-     * @param graftAnswers   the bundle copies the writer sent beyond its eager pushes: its RUMOR bytes during the push,
-     *                       in whole bundles, less the eager copies
+     * @param graftAnswers   every answer: the bundle copies the writer sent beyond its eager pushes, its RUMOR bytes
+     *                       during the push, in whole bundles, less the eager copies
+     * @param askedAfterOther the GRAFTs for a bundle that reached the writer from an asker that had heard another member
+     *                        announce it, each of which the writer answers: what P2-Q-PRF-04 (a) as restated forbids
+     * @param askedWriterOnly the GRAFTs for a bundle that reached the writer from an asker that had heard only the
+     *                        writer announce it, which the restated check allows
+     * @param unread         the frames the witness could not read during the push, so the restated check cannot pass
+     *                       on what it did not see
      */
     public record Push(int followers, long deltaBytes, long bundles, long copies, long writerBytes, long fetched, long fallbacks,
                        long millis, boolean complete, List<Long> followerMillis, Map<String, Long> repairs, int eagerEdges,
-                       int eagerEdgesAfter, long graftsAtWriter, long graftAnswers) {
+                       int eagerEdgesAfter, long graftsAtWriter, long graftAnswers, long askedAfterOther,
+                       long askedWriterOnly, long unread) {
+
+        /** P2-Q-PRF-04 (a) as the owner restated it: no answer to an asker that had heard another member announce. */
+        public boolean restatedCheck() {
+            return askedAfterOther == 0 && unread == 0;
+        }
 
         /** P2-Q-PRF-04 (b): one copy of each bundle per eager edge the writer held when it published. */
         public boolean onePerEdge() {
@@ -149,12 +162,14 @@ public final class PushReconcileStress {
                                 + " sent %d bytes, %d fetched, %d fallbacks%n", push.deltaBytes(), push.bundles(), push.followers(),
                         push.millis(), push.complete() ? "every follower holds it" : "INCOMPLETE", push.copies(),
                         push.writerBytes(), push.fetched(), push.fallbacks()));
-                out.append(String.format("  P2-Q-PRF-04 (a) bundle copies the writer sent in answer to GRAFTs: %d (bound 0) %s,"
-                                + " %d GRAFTs reached it; (b) eager copies %d for %d eager edges (%d after the write) x %d bundles %s;"
-                                + " the writer sent %.2f x the delta; P2-P-03 TREE_WANTs %d (bound 0) %s%n", push.graftAnswers(),
-                        verdict(push.graftAnswers() == 0), push.graftsAtWriter(), push.copies(), push.eagerEdges(),
-                        push.eagerEdgesAfter(), push.bundles(), verdict(push.onePerEdge()),
-                        push.writerRatio(), push.fetched(), verdict(push.fetched() == 0)));
+                out.append(String.format("  P2-Q-PRF-04 (a) answers to askers that had heard another member announce the"
+                                + " bundle: %d (bound 0) %s; all answers %d (bundle copies beyond the eager pushes), %d to askers"
+                                + " that had heard the writer alone, %d GRAFTs reached it, %d frames unread;"
+                                + " (b) eager copies %d for %d eager edges (%d after the write) x %d bundles %s;"
+                                + " the writer sent %.2f x the delta; P2-P-03 TREE_WANTs %d (bound 0) %s%n", push.askedAfterOther(),
+                        verdict(push.restatedCheck()), push.graftAnswers(), push.askedWriterOnly(), push.graftsAtWriter(),
+                        push.unread(), push.copies(), push.eagerEdges(), push.eagerEdgesAfter(), push.bundles(),
+                        verdict(push.onePerEdge()), push.writerRatio(), push.fetched(), verdict(push.fetched() == 0)));
                 out.append(String.format("  each follower held the root after (ms): %s%n  the swarm's repairs during the push: %s%n",
                         push.followerMillis(), push.repairs()));
             }
@@ -287,7 +302,8 @@ public final class PushReconcileStress {
     private static Push pushRun(int peerCount, String binding, Duration deadline) throws Exception {
         CborCodec codec = CborCodec.defaultCodec();
         List<Member> members = new ArrayList<>();
-        try (MiniFleet fleet = MiniFleet.start("pdt-push", peerCount, Duration.ofMillis(100), binding)) {
+        AskerWitness witness = new AskerWitness(PushReceiver.stream("refs", "plans"));
+        try (MiniFleet fleet = MiniFleet.start("pdt-push", peerCount, Duration.ofMillis(100), binding, witness::wrap)) {
             for (int i = 0; i < peerCount; i++) {
                 members.add(join(fleet.peer(i), i, codec, deadline, null));
             }
@@ -310,6 +326,7 @@ public final class PushReconcileStress {
             long graftsBefore = graftsReceived(writer);
             long rumorBytesBefore = rumorBytesSent(writer);
             int eagerEdges = eagerEdges(writer);
+            witness.arm(writer.peer().identity().peerId());
             long start = System.nanoTime();
             PMap<String, String> big = refs.get(0).swap(m -> grow(m, PUSH_DELTA_BYTES, 7));
             int eagerEdgesAfter = eagerEdges(writer);
@@ -329,6 +346,9 @@ public final class PushReconcileStress {
             long millis = (System.nanoTime() - start) / 1_000_000;
             long writerBytes = writer.peer().node().traffic().bytesSent() - sentBefore;
             long graftsAtWriter = graftsReceived(writer) - graftsBefore;
+            long askedAfterOther = witness.afterOther();
+            long askedWriterOnly = witness.writerOnly();
+            long unread = witness.unread();
             long rumorBytes = rumorBytesSent(writer) - rumorBytesBefore;
             Thread.sleep(1_000); // the last settles reach the counters
             PushPublisher.Stats pushed = writer.pdt().refs().pushStats();
@@ -341,7 +361,8 @@ public final class PushReconcileStress {
             List<Long> followerMillis = java.util.Arrays.stream(heldAt).sorted().boxed().toList();
             return new Push(followers.size(), pushed.bytesPushed(), pushed.bundlesSent(), copies, writerBytes, fetched, fallbacks,
                     millis, complete, followerMillis, repairs, eagerEdges, eagerEdgesAfter, graftsAtWriter,
-                    Math.max(0, rumorBytes * pushed.bundlesSent() / Math.max(1, pushed.bytesPushed()) - copies));
+                    Math.max(0, rumorBytes * pushed.bundlesSent() / Math.max(1, pushed.bytesPushed()) - copies),
+                    askedAfterOther, askedWriterOnly, unread);
         } finally {
             members.forEach(Member::close);
         }

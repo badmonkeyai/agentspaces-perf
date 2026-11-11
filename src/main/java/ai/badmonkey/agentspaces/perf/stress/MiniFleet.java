@@ -19,6 +19,7 @@ import ai.badmonkey.agentspaces.api.ad.GroupAdvertisement;
 import ai.badmonkey.agentspaces.api.ad.PeerAdvertisement;
 import ai.badmonkey.agentspaces.api.space.ConflictStrategyType;
 import ai.badmonkey.agentspaces.common.id.GroupId;
+import ai.badmonkey.agentspaces.common.id.PeerId;
 import ai.badmonkey.agentspaces.identity.PeerIdentity;
 import ai.badmonkey.agentspaces.peering.membership.GroupMembership;
 import ai.badmonkey.agentspaces.peering.node.GroupRuntime;
@@ -36,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiFunction;
 
 /**
  * A multi-peer fleet in one JVM over real TCP loopback: each peer runs its own
@@ -68,13 +70,16 @@ public final class MiniFleet implements AutoCloseable {
     private final GroupAdvertisement group;
     private final Duration settleWindow;
     private final String binding;
+    private final BiFunction<PeerId, Transport, Transport> wrap;
     private final List<Peer> peers = new ArrayList<>();
     private int seedPort;
 
-    private MiniFleet(GroupAdvertisement group, Duration settleWindow, String binding) {
+    private MiniFleet(GroupAdvertisement group, Duration settleWindow, String binding,
+                      BiFunction<PeerId, Transport, Transport> wrap) {
         this.group = group;
         this.settleWindow = settleWindow;
         this.binding = binding;
+        this.wrap = wrap;
     }
 
     /** The binding every peer listens on: {@code tcp}, {@code tls} (per-peer channel certificates), or {@code dtls} (UDP). */
@@ -108,6 +113,23 @@ public final class MiniFleet implements AutoCloseable {
      */
     public static MiniFleet start(String groupName, int peerCount, Duration settleWindow, String binding)
             throws Exception {
+        return start(groupName, peerCount, settleWindow, binding, (self, transport) -> transport);
+    }
+
+    /**
+     * Starts a fleet on a binding whose every peer listens and dials through a wrapper, so a run can read the frames
+     * on the wire.
+     *
+     * @param groupName    the group's founding name
+     * @param peerCount    how many peers to start
+     * @param settleWindow the take settle window for every replica
+     * @param binding      {@code tcp}, {@code tls}, or {@code dtls}
+     * @param wrap         given a peer and its binding, the binding the peer listens and dials on
+     * @return the running fleet
+     * @throws Exception when a peer fails to start
+     */
+    public static MiniFleet start(String groupName, int peerCount, Duration settleWindow, String binding,
+                                  BiFunction<PeerId, Transport, Transport> wrap) throws Exception {
         if (!binding.equals("tcp") && !binding.equals("tls") && !binding.equals("dtls")) {
             throw new IllegalArgumentException("binding must be tcp, tls, or dtls, not " + binding);
         }
@@ -117,7 +139,7 @@ public final class MiniFleet implements AutoCloseable {
                 Instant.EPOCH, Duration.ofDays(365), groupName,
                 GroupAdvertisement.MembershipPolicy.OPEN, ConflictStrategyType.LEASE_RACE,
                 GroupAdvertisement.GossipParameters.defaults());
-        MiniFleet fleet = new MiniFleet(group, settleWindow, binding);
+        MiniFleet fleet = new MiniFleet(group, settleWindow, binding, wrap);
         for (int i = 0; i < peerCount; i++) {
             fleet.addPeer();
         }
@@ -139,7 +161,7 @@ public final class MiniFleet implements AutoCloseable {
             case "dtls" -> new ai.badmonkey.agentspaces.transport.dtls.DtlsTransport(identity);
             default -> new TcpTransport();
         };
-        node.listen(transport, "127.0.0.1:" + port);
+        node.listen(wrap.apply(identity.peerId(), transport), "127.0.0.1:" + port);
         List<PeerAdvertisement.Endpoint> seeds = seedPort == 0 ? List.of()
                 : List.of(new PeerAdvertisement.Endpoint(binding, "127.0.0.1:" + seedPort, 0));
         GroupRuntime runtime = node.joinGroup(group,

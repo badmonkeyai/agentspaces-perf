@@ -161,10 +161,15 @@ the writer's bus sent, the fetches the followers made, and the fallbacks, and gi
 delay and the swarm's GRAFT and repair counters during the push, ROBUSTNESS.md §10.5) and `reconcile` (P2-K-02,
 P2-Q-PRF-06: two members reconcile two sets of 100,000 roots that differ by 1,000 at random places,
 once by negentropy and once by RIBLT). Run them as `-Dmodes=push,reconcile -Dpeers=21`. The `push`
-report checks P2-Q-PRF-04 as the owner restated it on 2026-11-09: (a) the GRAFT frames that reached
-the writer during the push, each of which it answers with a copy, against 0; and (b) the eager copies
-of each bundle against the writer's eager edges, its view less its lazy members, counted just before
-and just after the write.
+report checks P2-Q-PRF-04 as the owner restated it on 2026-11-09: (a) the writer's answers to askers
+that had heard another member announce the bundle, against 0; and (b) the eager copies of each bundle
+against the writer's eager edges, its view less its lazy members, counted just before and just after
+the write. For (a), a witness reads every member's wire during the push (`AskerWitness`). It notes
+which members heard the bundle announced by a member other than the writer, and it splits the GRAFTs
+for the bundle that reach the writer into those askers and askers that heard the writer alone, which
+the check allows (ROBUSTNESS.md §10.11). The report keeps every answer visible as a figure: the
+bundle copies the writer sent beyond its eager pushes. A frame the witness cannot read counts against
+the check, so it never passes on what the witness did not see.
 
 `PdtStress` hands the PDT 2 phase 8 modes to `PdtRefStress` (P2-O-04), which gives every member a
 ref facade and runs two content stores: `store-cold` (P2-Q-PRF-02: peer 0 writes a blob ref, pins it
@@ -263,6 +268,7 @@ builds held the 1-minute load between 6.9 and 17.2:
 | the same | dtls, 8 | the same deltas, 800 to 925 ms each | PASS |
 | `text`, 1,000 concurrent edits by two replicas | tcp, 8 | 2 heads; a member received 28,635 bytes for both, 28.6 bytes per edit; the slowest first merging read 77.5 ms; one edit after the merge shipped the 28,140-byte `t` node whole | P2-Q-PRF-09 (100 ms, 50 bytes) PASS |
 | the same | dtls, 8 | the same bytes; merge 54.6 ms | PASS |
+| `push` with the witness, fifteen runs in three sets of five (2026-11-10, ROBUSTNESS.md §10.11) | tcp, 21 | all answers: 1 in one run, 0 in fourteen; answers to askers that had heard another member: the same 1; answers to askers that had heard the writer alone: 0; no frame unread; 4 to 14 eager edges, 4.10 to 14.36 x the delta; the last follower after 134 to 789 ms | P2-Q-PRF-04 (a) as restated PASS in 14 of 15, (b) PASS in 15 of 15 |
 | `blob-edit`, ten one-byte edits of 64 MiB | tcp, 3 | level 2: median 3,323 bytes, max 5,487; level 1, the same edits: median 76,885, max 123,574; each edit at level 2 moved 0.021 to 0.072 of its level-1 bytes | P2-Z-03 and P2-Q-PRF-08 as restated (median 8 KiB, max 16 KiB, under a tenth of level 1) PASS |
 
 The smoke suite asserts the PD-Q-PRF-08 ratio (at most 1.25) and the

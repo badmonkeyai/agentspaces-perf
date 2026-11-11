@@ -195,6 +195,10 @@ class StressSmokeTest {
         assertThat(report.push().graftsAtWriter()).as("the GRAFTs that reached the writer are counted").isNotNegative();
         assertThat(report.push().graftAnswers()).as("P2-Q-PRF-04 (a), a figure: the writer's copies beyond its eager pushes")
                 .isBetween(0L, (long) report.push().followers());
+        // the restated (a) (ROBUSTNESS.md §10.11): the witness read every frame and split the GRAFTs at the writer
+        assertThat(report.push().unread()).as("the witness read every frame of the push").isZero();
+        assertThat(report.push().askedAfterOther() + report.push().askedWriterOnly())
+                .as("the bundle's GRAFTs are among those that reached the writer").isBetween(0L, report.push().graftsAtWriter());
         assertThat(report.push().writerRatio()).as("at most one copy a follower").isLessThanOrEqualTo(report.push().followers() * 1.1);
         assertThat(report.reconciles()).hasSize(2);
         assertThat(report.reconciles()).allMatch(r -> r.have() == 500 && r.need() == 500);
